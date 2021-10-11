@@ -7,13 +7,67 @@ catch {
     Install-Module -Scope CurrentUser PsIni
     Import-Module PsIni                             # https://github.com/lipkau/PsIni
 }
-if ($false) {
-        # WARN : Must be admin
-        # Install the OpenSSH Client and Server  
+
+$SSHAvailable=$false
+
+#if ($psversiontable.psversion.major -gt 5) {
+        <## WARN : Must be admin
+        # Install the OpenSSH Client and Server  (https://docs.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse)
         if ((Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.client*').state -eq "NotPresent") {
             Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0
         }
-}         # Test et installation de SSH
+        if ((Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.server*').state -eq "NotPresent") {
+            Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+        }
+
+        # Start the sshd service
+        Start-Service sshd
+
+        # OPTIONAL but recommended:
+        Set-Service -Name sshd -StartupType 'Automatic'
+
+        # Confirm the Firewall rule is configured. It should be created automatically by setup. Run the following to verify
+        if (!(Get-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -ErrorAction SilentlyContinue | Select-Object Name, Enabled)) {
+            Write-Output "Firewall Rule 'OpenSSH-Server-In-TCP' does not exist, creating it..."
+            New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH Server (sshd)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22
+        } else {
+            Write-Output "Firewall rule 'OpenSSH-Server-In-TCP' has been created and exists."
+        }
+
+        Install-Module Posh-SSH
+        get-command -module posh-ssh ==> Vide ou liste de commandes
+
+        # CD C:\_SUN\_HW_Installed
+        # msiexec.exe /package PowerShell-7.1.4-win-x64.msi /quiet ADD_EXPLORER_CONTEXT_MENU_OPENPOWERSHELL=1 ADD_FILE_CONTEXT_MENU_RUNPOWERSHELL=1 ENABLE_PSREMOTING=0 REGISTER_MANIFEST=1
+        #>
+        #(Get-Command New-PSSession).ParameterSets.Name # Must contain "SSHHOST" and "SSHHostHashParam"
+
+        #$session=New-SSHSession -ComputerName 192.168.168.40 -Credential (Get-Credential) -force
+        #(Invoke-SSHCommand -sshsession $session -command "ls").output
+        
+        #write-host ("PowerShell V6 ou supérieur")
+
+#}         # Test et installation de SSH
+#else {
+if ($true) {
+    #https://github.com/darkoperator/Posh-SSH/tree/master/docs
+    if ((get-command -module posh-ssh).count -eq 0) {
+        $result=Get-PackageProvider|where "name" -eq "NuGet"
+        if ($result.count -gt 0) {
+            Write-Host("Installing prerequisite : NuGet provider")
+            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Scope CurrentUser
+        }
+        Write-Host("Installing module : Posh-SSH")
+        Install-Module -Scope CurrentUser Posh-SSH 
+    }
+    if ((get-command -module posh-ssh).count -ne 0) {
+        $SSHavailable=$true
+    }
+    else {
+        write-host ("Module Posh-SSH not installed")
+    }
+    write-host ("PowerShell V5 ou inférieur")
+}
 #
 # Concerne le fichier de configuration
 #
@@ -50,6 +104,10 @@ $DisplaySpeed=960    # en CPS
 $TargetPageDir="/home/pi/python/PyMoIP/TestPages/Mta/"
 $TargetArboDir="Mta"                                        # Emplacement des fichiers arbo sur le serveur - ATTENTION, les points sont interdits
 #
+$RemoteHost="192.168.168.40"
+$Service="arbo_teletel"
+$ServerArboRoot="/home/pi/python/PyMoIP/Arbos"
+#
 $LineOffset=30
 $LineHeigth=40
 $PosButton=182
@@ -59,9 +117,10 @@ $GUI_Groups=@(3,$ColPos[0],10,($LineWidth[0]+24),(3*$LineHeigth+$LineOffset-$Lin
             @(3,$ColPos[0],170,($LineWidth[0]+24),(3*$LineHeigth+$LineOffset-$LineHeigth/2+5),"Mode de conversion"),
             @(8,$ColPos[0],320,($LineWidth[0]+24),(8*$LineHeigth+$LineOffset-$LineHeigth/2+5),"Définition des pages d'infos/commentaires"),
             @(2,($ColPos[1]+$LineWidth[0]),10 ,($LineWidth[1]+24),(2*$LineHeigth+$LineOffset-$LineHeigth/2+5),"Répertoire effectif sur la machine serveur PyMoIP"),
-            @(5,($ColPos[1]+$LineWidth[0]),320,($LineWidth[1]+24),(5*$LineHeigth+$LineOffset-$LineHeigth/2+5),"Constantes des noeuds d'arbo générés"),
-            @(1,($ColPos[1]+$LineWidth[0]),170,($LineWidth[1]+24),(2.5*$LineHeigth+$LineOffset-$LineHeigth/2+5),"Chaines détectées pour la séparation des pages"),
-            @(1,10,10,($ColPos[0]-20),(1*$LineHeigth+$LineOffset-$LineHeigth/2+8),"Fichier de configuration")
+            @(5,($ColPos[1]+$LineWidth[0]),280,($LineWidth[1]+24),(5*$LineHeigth+$LineOffset-$LineHeigth/2+5),"Constantes des noeuds d'arbo générés"),
+            @(1,($ColPos[1]+$LineWidth[0]),140,($LineWidth[1]+24),(2.5*$LineHeigth+$LineOffset-$LineHeigth/2+5),"Chaines détectées pour la séparation des pages"),
+            @(1,10,10,($ColPos[0]-20),(1*$LineHeigth+$LineOffset-$LineHeigth/2+8),"Fichier de configuration"),
+            @(1,($ColPos[1]+$LineWidth[0]),520,($LineWidth[1]+24),(3*$LineHeigth+$LineOffset-$LineHeigth/2+5),"Hôte distant")
 
 $Button_Click_Select_SourceDir       = { Select_SourceDir }
 $Button_Click_Select_DestDir         = { Select_DestDir }
@@ -125,6 +184,10 @@ $GUI_Var=$data = @(
                                                                 CallbackDel = "Button_Click_Select_DelConf";
                                                                 CallbackSave = "Button_Click_Select_SaveConf";
                                                                 CallbackText = "Event_TextChanged"}
+
+    [pscustomobject]@{Grp=7;VarName='RemoteHost';             PosX=10; PosY=($LineHeigth * 0)+$LineOffset;SizX=$LineWidth[1]; SizY=18; TextSelect=$true}
+    [pscustomobject]@{Grp=7;VarName='Service';                PosX=10; PosY=($LineHeigth * 1)+$LineOffset;SizX=$LineWidth[1]; SizY=18; TextSelect=$true}
+    [pscustomobject]@{Grp=7;VarName='ServerArboRoot';         PosX=10; PosY=($LineHeigth * 2)+$LineOffset;SizX=$LineWidth[1]; SizY=18; TextSelect=$true}
 )
 
 $GUI_Desc=@( "Source VDT sur la machine source (répertoire (avec wildcard possible) ou fichier)",
@@ -155,7 +218,11 @@ $GUI_Desc=@( "Source VDT sur la machine source (répertoire (avec wildcard possib
 
             "[1 chaine par ligne - valeurs séparées par des ','] (ex 12 ou x1F,x40,x41 )",
 
-            "Choix de la section"
+            "Choix de la section",
+
+            "Hôte distant",
+            "Service",
+            "Racine des arbos de PyMoIP-Server"
             )
 #
 
@@ -208,6 +275,10 @@ function UpdateVarsFromConf () {
     if ($conf[$ConfigSection]["TargetPageDir"]) {         set-variable -name "TargetPageDir" -scope script -value ([string]$conf[$ConfigSection]["TargetPageDir"])    }
     if ($conf[$ConfigSection]["TargetArboDir"]) {         set-variable -name "TargetArboDir" -scope script -value ([string]$conf[$ConfigSection]["TargetArboDir"])    }
     
+    if ($conf[$ConfigSection]["RemoteHost"]) {            set-variable -name "RemoteHost" -scope script -value ([string]$conf[$ConfigSection]["RemoteHost"])    }
+    if ($conf[$ConfigSection]["Service"]) {               set-variable -name "Service" -scope script -value ([string]$conf[$ConfigSection]["Service"])    }
+    if ($conf[$ConfigSection]["ServerArboRoot"]) {        set-variable -name "ServerArboRoot" -scope script -value ([string]$conf[$ConfigSection]["ServerArboRoot"])    }
+
     if ($trace -eq $true) { write-host("UpdateVarsFromConf() done") }
 }                                # Mise à jour des variables globales depuis $conf[$ConfigSection]
 function ConvertSplitTabList ([ref]$SplitTab) {
@@ -311,6 +382,11 @@ if ($ConfigFound -ne $true) {
             #
     $conf[$ConfigSection]+=@{"TargetPageDir"=         $TargetPageDir }
     $conf[$ConfigSection]+=@{"TargetArboDir"=         $TargetArboDir }
+
+    $conf[$ConfigSection]+=@{"RemoteHost"=            $RemoteHost }
+    $conf[$ConfigSection]+=@{"Service"=               $Service }
+    $conf[$ConfigSection]+=@{"ServerArboRoot"=        $ServerArboRoot }
+
 }                       # Si $ConfigSection n'a pas été trouvée, l'ajouter à $conf[] à partir des variables définies par défaut
 
 
@@ -640,7 +716,7 @@ function SplitVDT { param ($outputBox)
         $TotalCountSkipped=0
         $UpdatePrevNode=""
         foreach ($SourceFile in $SourceFiles) {
-            if (Test-Path -Path $ConfigFile -PathType Leaf) {
+            if ($sourcefile.PSIsContainer -eq $false) {     #Test-Path -Path $ConfigFile -PathType Leaf) {
                 $CountFiles=$CountFiles+1
                 $PageBase=$DestDir+"\"+$SourceFile.Name
                 $ArboBase=$DestArboDir+"\"+$SourceFile.Name
@@ -722,6 +798,133 @@ function StartButton {
     $Button.Text = "Démarrer" 
     if ($trace -eq $true) { write-host "StartButton() done" }
 } #end pingInfo
+function StartButton2 {
+    if ($trace -eq $true) { write-host "StartButton2()" }
+    SaveConfFromGUI
+    UpdateVarsFromConf
+    $ok=$false
+    if ($creds.GetType().name -eq "PSCredential") {
+        if ($creds.UserName -ne "") {
+            if ($trace -eq $true) { write-host("Déjà identifié") }
+                $ok=$true
+        }
+    }
+    if ($ok -eq $false) {
+        try {
+            $creds=Get-Credential
+            Set-Variable -scope script -Name "creds" -Value $creds
+            $ok=$true
+        }
+        catch {
+            $ok=$false
+        }
+    }
+    #write-host ("Openning session to RemoteHost ("+$RemoteHost+")")
+    #$SSHsession=New-SSHSession -ComputerName $RemoteHost -Credential ($creds) -force
+    #if ($SSHsession) {
+    if ($ok -eq $true) {
+        #$SSHsession=New-SSHSession -ComputerName $RemoteHost -Credential ($creds) -force
+        #
+        # Envoyer une commande à un Linux (et traiter le retour)
+        #
+        #$MyCommand="ls -1 -d "+$ServerArboRoot+"/"+$Service+"/"+$TargetArboDir+"/* -p|grep -v /$"
+                    #"ls "+$ServerArboRoot+"/"+$Service+"/"+$TargetArboDir
+        #write-host("MyCommand ='"+$MyCommand+"'")
+        #$result=Invoke-SSHCommand -sshsession $SSHsession -command $MyCommand
+        #if ($result.ExitStatus -eq 0) {
+        #    write-host("[Status OK for command ['"+ $MyCommand +"']")
+        #}
+        #else {
+        #    write-host("[Status "+[string]$result.ExitStatus+" for command ['"+ $MyCommand +"']")
+        #}
+        #foreach ($file in $result.Output) {
+        #    write-host($file)
+        #}
+        $Button2.Text = "Transfert en cours" 
+        $Button2.Refresh()
+        #write-host($DestDir)
+        $outputBox.lines += ("User:"+([string]$creds.UserName))
+        $count=0
+        $counta=0
+        foreach ($file in Get-ChildItem $DestDir) {
+            if ($File.PSIsContainer -eq $false) {
+                #write-host ("Src:"+([string]$file.fullname))
+                #write-host ("Dst:"+$TargetPageDir+$file.name)
+
+                $outputBox.lines += ("Src:"+([string]$file.fullname))
+                $outputBox.lines += ("Dst:"+$TargetPageDir+$file.name)
+                $outputBox.SelectionStart = $outputBox.Text.Length;
+                $outputBox.ScrollToCaret()
+                $outputBox.Refresh()
+                $count=$count+1
+                try {
+                    set-SCPItem -ComputerName $RemoteHost -Credential $creds -path ([string]$file.fullname) -destination ($TargetPageDir) #-newname ($file.name)
+                }
+                catch {
+                    $outputBox.lines += ("Erreur ... mauvais user/password ?")
+                    $outputBox.SelectionStart = $outputBox.Text.Length;
+                    $outputBox.ScrollToCaret()
+                    $outputBox.Refresh()
+                    break
+                }
+            }
+        }
+        $outputBox.lines += ("")
+
+        # write-host($DestArboDir)
+        $temp=$ServerArboRoot + "/" + $Service+ "/" 
+        if ($TargetArboDir.length -gt 0) {
+            $temp = $temp + (ReplaceChar $TargetArboDir "." "/")+"/"
+        }
+        foreach ($file in Get-ChildItem $DestArboDir) {
+            if ($File.PSIsContainer -eq $false) {
+                #write-host ("Src:"+([string]$file.fullname))
+                #write-host ("Dst:"+$temp + $file.name)
+
+                $outputBox.lines += ("Src:"+([string]$file.fullname))
+                $outputBox.lines += ("Dst:"+$temp + $file.name)
+                $outputBox.SelectionStart = $outputBox.Text.Length;
+                $outputBox.ScrollToCaret()
+                $outputBox.Refresh()
+                $counta=$counta+1
+                try {
+                    set-SCPItem -ComputerName $RemoteHost -Credential $creds -path ($file.fullname) -destination ($temp) # -newname ($file.name)
+                }
+                catch {
+                    $outputBox.lines += ("Erreur ... mauvais user/password ?")
+                    $outputBox.SelectionStart = $outputBox.Text.Length;
+                    $outputBox.ScrollToCaret()
+                    $outputBox.Refresh()
+                    break
+                }
+            }
+        }
+        $outputBox.lines += ("")
+        $outputBox.lines += ("Transféré "+[string]$count+" pages et "+[string]$counta+" noeuds arbo." )
+        $outputBox.lines += ("")
+        $outputBox.SelectionStart = $outputBox.Text.Length;
+        $outputBox.ScrollToCaret()
+        $outputBox.Refresh()
+
+        #
+        # Copier un fichier vers Linux
+        #
+        #set-SCPItem -ComputerName 192.168.168.40 -Credential $creds -path ".\config_SplitVDT.ini" -destination "/home/pi/python/mod_test" -NewName "testbla1.txt"
+        $Button2.Text = "Transférer" 
+        #Remove-SSHSession $SSHsession
+    }
+    if ($trace -eq $true) { write-host "StartButton2() done" }
+}
+function StartButton3 {
+    try {
+        $creds=Get-Credential
+        Set-Variable -scope script -Name "creds" -Value $creds
+    }
+    catch {
+        write-host("Cancelled")
+    }
+}
+
 function GUI_getValues($formTitle, $textTitle){
     [void] [System.Reflection.Assembly]::LoadWithPartialName("System.Drawing") 
     [void] [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms") 
@@ -1393,18 +1596,45 @@ if ($trace -eq $true) { write-host($conf.keys) }
 $Form = New-Object System.Windows.Forms.Form    
 $Form.Size = New-Object System.Drawing.Size(($ColPos[0] + $LineWidth[0]+$LineWidth[1] + 28*3),(18*$LineHeigth)) # 10*3*2 + 18*3*2 +
 $Form.AutoScroll=$true
-$Form.Text="SplitVDT.ps1" 
+$Form.Text="SplitVDT.ps1 v1.2" 
 
 $Form.Add_Shown({$Form.Activate()})
 
 $outputBox=InitGUI
 ############################################## Start buttons
-$Button = New-Object System.Windows.Forms.Button 
-$Button.Location = New-Object System.Drawing.Size(10,(1.5*$LineHeigth+$LineOffset-$LineHeigth/2+5)) 
-$Button.Size = New-Object System.Drawing.Size(($ColPos[0]-20),50) 
-$Button.Text = "Démarrer" 
-$Button.Add_Click({StartButton}) 
-$Form.Controls.Add($Button) 
+if ($SSHavailable) {
+    $Button = New-Object System.Windows.Forms.Button 
+    $Button.Location = New-Object System.Drawing.Size(10,(1.5*$LineHeigth+$LineOffset-$LineHeigth/2+5)) 
+    $Button.Size = New-Object System.Drawing.Size((($ColPos[0]/2)-10),50) 
+    $Button.Text = "Démarrer" 
+    $Button.Add_Click({StartButton}) 
+    $Form.Controls.Add($Button) 
+    $Button2 = New-Object System.Windows.Forms.Button 
+    $Button2.Location = New-Object System.Drawing.Size((10+($ColPos[0]/2)),(1.5*$LineHeigth+$LineOffset-$LineHeigth/2+5)) 
+    $Button2.Size = New-Object System.Drawing.Size((($ColPos[0]/4)-20),50) 
+    $Button2.Text = "Transférer" 
+    $Button2.Add_Click({StartButton2}) 
+    $Form.Controls.Add($Button2) 
+
+    $Button3 = New-Object System.Windows.Forms.Button 
+    $Button3.Location = New-Object System.Drawing.Size((10+($ColPos[0]/4)*3),(1.5*$LineHeigth+$LineOffset-$LineHeigth/2+5)) 
+    $Button3.Size = New-Object System.Drawing.Size((($ColPos[0]/4)-20),50) 
+    $Button3.Text = "Credentials" 
+    $Button3.Add_Click({StartButton3}) 
+    $Form.Controls.Add($Button3) 
+    }
+else {
+    $Button = New-Object System.Windows.Forms.Button 
+    $Button.Location = New-Object System.Drawing.Size(10,(1.5*$LineHeigth+$LineOffset-$LineHeigth/2+5)) 
+    $Button.Size = New-Object System.Drawing.Size((($ColPos[0])-20),50) 
+    $Button.Text = "Démarrer" 
+    $Button.Add_Click({StartButton}) 
+    $Form.Controls.Add($Button) 
+}
 ############################################## end buttons
 
 $z=$Form.ShowDialog()
+
+if ($SSHsession) {
+    Remove-SSHSession $SSHsession
+}
