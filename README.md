@@ -13,5 +13,6 @@ Mass videotext pages import tool ... [PowerShell] for PyMoIP-Server
 - Keeps multiple configurations in a .ini file to allow replaying the imports
 - Transfers resulting files to PyMoIP-Server host
 
-From version 1.1, support for [PREVIOUS] key
-From version 1.2, support for direct SCP to host
+From version 1.1, support for [PREVIOUS] key.
+
+From version 1.2, support for direct SCP to host.
